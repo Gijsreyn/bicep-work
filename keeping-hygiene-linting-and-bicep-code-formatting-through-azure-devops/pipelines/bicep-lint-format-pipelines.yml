@@ -1,0 +1,66 @@
+variables:
+  imageName: windows-latest
+
+pool:
+  vmImage: $(imageName)
+
+stages:
+  - stage: Lint
+    jobs:
+      - job: Lint
+        displayName: "Lint Bicep code"
+        steps:
+          - powershell: |
+              choco upgrade bicep
+            ignoreLASTEXITCODE: true
+
+          - task: PowerShell@2
+            displayName: 'Start linting'
+            inputs:
+              filePath: 'Scripts/bicep-linter.ps1'
+              arguments: '-SourcePath src -OutputPath $(Build.ArtifactStagingDirectory)'
+              ignoreLASTEXITCODE: true
+              workingDirectory: $(System.DefaultWorkingDirectory)
+          
+          - task: PowerShell@2
+            displayName: 'Validate linting result(s)'
+            inputs:
+              filePath: 'Scripts/bicep-linter-validate.ps1'
+              arguments: '-Path $(Build.ArtifactStagingDirectory)'
+              showWarnings: true
+          
+          - task: PublishPipelineArtifact@1
+            condition: always() # Allow to publish scan results to Scans tab
+            displayName: 'Publish artifact(s)'
+            inputs:
+              targetPath: "$(Build.ArtifactStagingDirectory)"
+              artifact: "CodeAnalysisLogs"
+              publishLocation: "pipeline"
+  
+  - stage: Formatting
+    condition: always() # Even if previous stage fails we can run the formatter
+    jobs:
+
+      - job: Formatting 
+        displayName: 'Format Bicep file(s)'
+        steps:
+          - task: PowerShell@2
+            displayName: 'Start formatting'
+            inputs:
+              filePath: 'Scripts/bicep-formatter.ps1'
+              arguments: '-SourcePath $(System.DefaultWorkingDirectory)\src'
+              workingDirectory: $(System.DefaultWorkingDirectory)
+          - task: PowerShell@2
+            displayName: 'Get differences'
+            inputs:
+              filePath: 'Scripts/bicep-diff.ps1'
+              arguments: '-OutputPath $(Build.ArtifactStagingDirectory)'
+              workingDirectory: $(System.DefaultWorkingDirectory)
+              showWarnings: true
+          - task: PublishPipelineArtifact@1
+            condition: always() # Allow publish even if there are no results
+            displayName: 'Publish differences'
+            inputs:
+              targetPath: "$(Build.ArtifactStagingDirectory)"
+              artifact: "Diff"
+              publishLocation: "pipeline"
